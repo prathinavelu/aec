@@ -6,57 +6,70 @@ import altair as alt
 import yaml
 from yaml.loader import SafeLoader
 
-# --- AUTH LIBRARIES ---
+# --- AUTH LIBRARIES (STABLE 0.3.3) ---
 import streamlit_authenticator as stauth
-from streamlit_authenticator.utilities.hasher import Hasher
+
+# --- GOOGLE SHEETS CONNECTION ---
+from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# 0. AUTHENTICATION SETUP (SECURE)
+# 0. CONFIGURATION & AUTH SETUP
 # ==========================================
 
-# 1. Define Users
+# 1. CONNECT TO GOOGLE SHEET
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 2. LOAD CONFIG DEFAULTS (Tab: "Config")
+# We try to load defaults, otherwise we use safe fallbacks
+config = {}
+try:
+    df_config = conn.read(worksheet="Config")
+    # Convert 2-column table (Key, Value) into a dictionary
+    config = dict(zip(df_config['Key'], df_config['Value']))
+except Exception:
+    # If config fails, we don't stop; we just use defaults later
+    pass
+
+# 3. DEFINE USERS
 names = ['Praveen R.', 'Guest User']
 usernames = ['pr', 'guest']
 
-# 2. LOAD PASSWORDS FROM SECRETS (Hidden from GitHub)
-# We access the [auth] section of secrets.toml
+# 4. LOAD PASSWORDS (HASHED)
+# We expect the 'Config' tab in Google Sheets to have keys:
+# 'pr_password_hash' and 'guest_password_hash' containing the $2b$ strings.
 try:
-    passwords = [st.secrets["auth"]["pr_password"], st.secrets["auth"]["guest_password"]]
-except FileNotFoundError:
-    st.error("Secrets file not found. Please configure secrets on Streamlit Cloud.")
+    if 'pr_password_hash' in config:
+        hashed_passwords = [config['pr_password_hash'], config['guest_password_hash']]
+    else:
+        # Fallback: Hash them on the fly (Only works if bcrypt installs correctly locally)
+        # This is just a safety net if the sheet is empty
+        raw_passwords = ['abc1234', 'test']
+        hashed_passwords = stauth.Hasher(raw_passwords).generate()
+except Exception as e:
+    st.error(f"Error initializing passwords. Please check Config sheet: {e}")
     st.stop()
-except KeyError:
-    st.error("Secrets are missing specific keys. Check your [auth] section.")
-    st.stop()
 
-# 3. Hash Passwords
-hashed_passwords = Hasher(passwords).generate()
-
-# 4. Create the 'credentials' dictionary
-credentials = {
-    "usernames": {
-        usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
-        usernames[1]: {"name": names[1], "password": hashed_passwords[1]}
-    }
-}
-
-# 5. Initialize Authenticator
+# 5. INITIALIZE AUTHENTICATOR (LEGACY 0.3.3 SYNTAX)
+# This version takes LISTS, not a dictionary
 authenticator = stauth.Authenticate(
-    credentials,
-    'coffee_app_cookie',  # Cookie Name
-    'abcdef',             # Key (Signature)
+    names,
+    usernames,
+    hashed_passwords,
+    'coffee_app_cookie', 
+    'abcdef',            
     cookie_expiry_days=30
 )
 
-# 6. Render Login Widget
-authenticator.login('main')
+# 6. RENDER LOGIN WIDGET
+name, authentication_status, username = authenticator.login('Login', 'main')
 
-# Get the status directly from session state
-if st.session_state["authentication_status"]:
-    
-    # --- SUCCESS: APP LOGIC STARTS HERE ---
+# ==========================================
+# APP LOGIC
+# ==========================================
+
+if authentication_status:
     authenticator.logout('Logout', 'main')
-    st.title(f"Welcome, {st.session_state['name']}!")
+    st.title(f"Welcome, {name}!")
 
     tab1, tab2 = st.tabs(["📊 Scenario Planning", "📅 2025 Lookback"])
 
@@ -64,9 +77,6 @@ if st.session_state["authentication_status"]:
     # TAB 1: SCENARIO PLANNING
     # ----------------------------------------------------
     with tab1:
-        # ==========================================
-        # 1. CONFIGURATION & PAGE SETUP
-        # ==========================================
         st.markdown("""
         <style>
             .big-font { font-size: 24px !important; font-weight: bold; }
@@ -77,30 +87,25 @@ if st.session_state["authentication_status"]:
         st.header("☕ Consolidated Coffee Business Engine")
         st.markdown("---")
 
-        # ==========================================
-        # 2. SIDEBAR - THE INPUTS
-        # ==========================================
         with st.sidebar:
             st.header("1. Supply Side (Green Buying)")
             st.caption("Enter the exact Amount (KG) you plan to buy:")
 
             col_a, col_b = st.columns(2)
             with col_a:
-                price_low = st.number_input("Low Price ($/kg)", value=6.0, step=0.5)
-                kg_low = st.number_input("Low Amount (KG)", value=300, step=50)
+                # Use .get() to pull from config, or use default if missing. 
+                # We wrap in float() or int() because Sheets might return strings.
+                price_low = st.number_input("Low Price ($/kg)", value=float(config.get('price_low', 6.0)), step=0.5)
+                kg_low = st.number_input("Low Amount (KG)", value=int(config.get('kg_low', 300)), step=50)
 
-                price_med = st.number_input("Med Price ($/kg)", value=12.0, step=0.5)
-                kg_med = st.number_input("Med Amount (KG)", value=500, step=50)
+                price_med = st.number_input("Med Price ($/kg)", value=float(config.get('price_med', 12.0)), step=0.5)
+                kg_med = st.number_input("Med Amount (KG)", value=int(config.get('kg_med', 500)), step=50)
 
-                price_high = st.number_input("High Price ($/kg)", value=45.0, step=1.0)
-                kg_high = st.number_input("High Amount (KG)", value=100, step=10)
+                price_high = st.number_input("High Price ($/kg)", value=float(config.get('price_high', 45.0)), step=1.0)
+                kg_high = st.number_input("High Amount (KG)", value=int(config.get('kg_high', 100)), step=10)
 
             total_supply_kg = kg_low + kg_med + kg_high
-
-            if total_supply_kg > 0:
-                blended_green_price = ((price_low * kg_low) + (price_med * kg_med) + (price_high * kg_high)) / total_supply_kg
-            else:
-                blended_green_price = 0
+            blended_green_price = ((price_low * kg_low) + (price_med * kg_med) + (price_high * kg_high)) / total_supply_kg if total_supply_kg > 0 else 0
 
             with col_b:
                 st.metric("Total Supply Plan", f"{total_supply_kg:,.0f} kg")
@@ -109,39 +114,37 @@ if st.session_state["authentication_status"]:
             st.divider()
 
             st.header("2. Operational Costs")
-            st.caption("Roasting Economics")
-            base_roast_cost = st.number_input("Base Roast Labor ($/kg)", value=2.50)
-            roast_step_threshold = st.number_input("Step Threshold (kg/mo)", value=1000)
-            roast_step_bump = st.number_input("Step Up Cost ($/kg)", value=1.00)
-            avg_shrinkage = st.slider("Roast Shrinkage (%)", 10, 25, 18) / 100
+            base_roast_cost = st.number_input("Base Roast Labor ($/kg)", value=float(config.get('base_roast_cost', 2.50)))
+            roast_step_threshold = st.number_input("Step Threshold (kg/mo)", value=int(config.get('roast_step_threshold', 1000)))
+            roast_step_bump = st.number_input("Step Up Cost ($/kg)", value=float(config.get('roast_step_bump', 1.00)))
+            avg_shrinkage = st.slider("Roast Shrinkage (%)", 10, 25, int(config.get('avg_shrinkage', 18))) / 100
 
             st.divider()
 
             st.header("3. Demand Side (Channels)")
-            st.caption("Projected Sales for January")
-
+            
             with st.expander("Shop Service (Cups)", expanded=False):
-                shop_vol_kg = st.slider("Shop Volume (Roasted KG)", 0, 500, 150)
-                shop_rev_kg = st.number_input("Shop Rev per KG ($)", value=85.0)
-                shop_cost_kg = st.number_input("Shop Labor/Pack per KG ($)", value=40.0)
+                shop_vol_kg = st.slider("Shop Volume (Roasted KG)", 0, 500, int(config.get('shop_vol_kg', 150)))
+                shop_rev_kg = st.number_input("Shop Rev per KG ($)", value=float(config.get('shop_rev_kg', 85.0)))
+                shop_cost_kg = st.number_input("Shop Labor/Pack per KG ($)", value=float(config.get('shop_cost_kg', 40.0)))
 
             with st.expander("Retail Bags (In-Store)", expanded=False):
-                retail_vol_kg = st.slider("Retail Volume (Roasted KG)", 0, 500, 100)
-                retail_rev_kg = st.number_input("Retail Rev per KG ($)", value=45.0)
-                retail_cost_kg = st.number_input("Retail Pack/Labor per KG ($)", value=5.0)
+                retail_vol_kg = st.slider("Retail Volume (Roasted KG)", 0, 500, int(config.get('retail_vol_kg', 100)))
+                retail_rev_kg = st.number_input("Retail Rev per KG ($)", value=float(config.get('retail_rev_kg', 45.0)))
+                retail_cost_kg = st.number_input("Retail Pack/Labor per KG ($)", value=float(config.get('retail_cost_kg', 5.0)))
 
             with st.expander("Online Subscriptions", expanded=True):
-                sub_vol_kg = st.slider("Sub Volume (Roasted KG)", 0, 1000, 200)
-                sub_rev_kg = st.number_input("Sub Rev per KG ($)", value=40.0)
-                sub_cost_kg = st.number_input("Sub Ship/Pack per KG ($)", value=8.0)
+                sub_vol_kg = st.slider("Sub Volume (Roasted KG)", 0, 1000, int(config.get('sub_vol_kg', 200)))
+                sub_rev_kg = st.number_input("Sub Rev per KG ($)", value=float(config.get('sub_rev_kg', 40.0)))
+                sub_cost_kg = st.number_input("Sub Ship/Pack per KG ($)", value=float(config.get('sub_cost_kg', 8.0)))
 
             with st.expander("Online Drops (High End)", expanded=True):
-                drop_vol_kg = st.slider("Drop Volume (Roasted KG)", 0, 200, 50)
-                drop_rev_kg = st.number_input("Drop Rev per KG ($)", value=120.0)
-                drop_cost_kg = st.number_input("Drop Ship/Pack per KG ($)", value=15.0)
+                drop_vol_kg = st.slider("Drop Volume (Roasted KG)", 0, 200, int(config.get('drop_vol_kg', 50)))
+                drop_rev_kg = st.number_input("Drop Rev per KG ($)", value=float(config.get('drop_rev_kg', 120.0)))
+                drop_cost_kg = st.number_input("Drop Ship/Pack per KG ($)", value=float(config.get('drop_cost_kg', 15.0)))
 
             with st.expander("Events / Catering", expanded=False):
-                event_vol_kg = st.slider("Event Volume (Roasted KG)", 0, 500, 0)
+                event_vol_kg = st.slider("Event Volume (Roasted KG)", 0, 500, 0) # Defaults to 0 often, so we can leave as 0 or config
                 event_rev_kg = st.number_input("Event Rev per KG ($)", value=60.0)
                 event_cost_kg = st.number_input("Event Labor per KG ($)", value=10.0)
 
@@ -150,9 +153,7 @@ if st.session_state["authentication_status"]:
                 bottle_rev_kg = st.number_input("Bottle Rev per KG ($)", value=150.0)
                 bottle_cost_kg = st.number_input("Bottle Prod Cost per KG ($)", value=80.0)
 
-        # ==========================================
-        # 3. LOGIC ENGINE
-        # ==========================================
+        # Logic Engine
         channels = {
             "Shop": {"vol": shop_vol_kg, "rev": shop_rev_kg, "var_cost": shop_cost_kg},
             "Retail": {"vol": retail_vol_kg, "rev": retail_rev_kg, "var_cost": retail_cost_kg},
@@ -178,9 +179,7 @@ if st.session_state["authentication_status"]:
         gross_profit = total_revenue - (total_green_cost_used + total_roast_cost + total_channel_var_cost)
         net_margin_pct = (gross_profit / total_revenue) * 100 if total_revenue > 0 else 0
 
-        # ==========================================
-        # 4. DASHBOARD LAYOUT
-        # ==========================================
+        # Dashboard Layout
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         kpi1.metric("Projected Revenue", f"${total_revenue:,.0f}")
         kpi2.metric("Projected Gross Profit", f"${gross_profit:,.0f}", f"{net_margin_pct:.1f}% Margin")
@@ -275,16 +274,16 @@ if st.session_state["authentication_status"]:
         profit_type = st.radio("Select Metric to Plot:", ("Gross Profit", "Net Profit"), horizontal=True)
 
         with st.expander("Adjust Scaling Assumptions", expanded=True):
-            base_fixed_costs = st.slider("Base Monthly Fixed Costs ($)", 1000, 15000, 5000, 500)
+            base_fixed_costs = st.slider("Base Monthly Fixed Costs ($)", 1000, 15000, int(config.get('base_fixed_costs', 5000)), 500)
             col1, col2, col3 = st.columns(3)
             with col1:
-                ws_margin = st.number_input("Wholesale Margin ($/lb)", value=4.0)
-                ws_share = st.slider("Wholesale % of Vol", 0, 100, 50)
+                ws_margin = st.number_input("Wholesale Margin ($/lb)", value=float(config.get('ws_margin', 4.0)))
+                ws_share = st.slider("Wholesale % of Vol", 0, 100, int(config.get('ws_share', 50)))
             with col2:
-                cafe_margin = st.number_input("Cafe Margin ($/lb)", value=18.0)
-                cafe_cap_kg = st.number_input("Cafe Cap (kg/mo)", value=360)
+                cafe_margin = st.number_input("Cafe Margin ($/lb)", value=float(config.get('cafe_margin', 18.0)))
+                cafe_cap_kg = st.number_input("Cafe Cap (kg/mo)", value=int(config.get('cafe_cap_kg', 360)))
             with col3:
-                online_margin = st.number_input("Online Margin ($/lb)", value=12.0)
+                online_margin = st.number_input("Online Margin ($/lb)", value=float(config.get('online_margin', 12.0)))
                 remaining_share = 100 - ws_share
                 st.markdown(f"**Online % of Vol:** {remaining_share}%")
 
@@ -320,37 +319,33 @@ if st.session_state["authentication_status"]:
         st.plotly_chart(fig, use_container_width=True)
 
     # ----------------------------------------------------
-    # TAB 2: 2025 LOOKBACK (Fixed Width & Secure Data)
+    # TAB 2: 2025 LOOKBACK (GOOGLE SHEETS INTEGRATED)
     # ----------------------------------------------------
     with tab2:
         st.header("📅 2025 Lookback: Historical Data Analysis")
         
-        # --- LOAD SECURE DATA FROM SECRETS (Hidden from GitHub) ---
-        months = pd.date_range(start='2025-01-01', periods=12, freq='MS').strftime('%Y-%m')
-        
-        # Accessing the financial lists we saved in secrets.toml
-        # If keys are missing, we default to zeros to prevent crashes
+        # 1. READ MONTHLY DATA
         try:
-            historical_costs = st.secrets["historical"]["costs"]
-            historical_sales = st.secrets["historical"]["sales"]
-        except (KeyError, FileNotFoundError):
-            st.warning("Historical data not found in Secrets. Using zeros.")
-            historical_costs = [0.0] * 12
-            historical_sales = [0.0] * 12
-
-        monthly_data = pd.DataFrame({
-            'Month': months, 
-            'Net Sales ($)': historical_sales, 
-            'Total Costs ($)': historical_costs
-        }).set_index('Month')
+            monthly_data = conn.read(worksheet="Monthly")
+            monthly_data['Month'] = monthly_data['Month'].astype(str) 
+            monthly_data = monthly_data.set_index('Month')
+        except Exception:
+            # Fallback
+            months = pd.date_range(start='2025-01-01', periods=12, freq='MS').strftime('%Y-%m')
+            monthly_data = pd.DataFrame({'Month': months, 'Net Sales ($)': [0.0]*12, 'Total Costs ($)': [0.0]*12}).set_index('Month')
         
-        items = ['Filter (Low)', 'Filter (Medium)', 'Filter (High)', 'Retail (Low)', 'Retail (Medium)', 'Retail (High)', 'Espresso + Milk', 'Matcha', 'Tea', 'Merch']
-        item_data = pd.DataFrame({'Item': items, 'Total Volume (kg)': [10.0, 50.0, 100.0, 50.0, 200.0, 300.0, 100.0, 5.0, 2.0, 10.0], 'Total Revenue ($)': [200.0, 800.0, 1500.0, 1000.0, 4000.0, 6000.0, 3000.0, 150.0, 50.0, 500.0], 'Total COGS ($)': [50.0, 200.0, 300.0, 250.0, 1000.0, 1500.0, 750.0, 30.0, 10.0, 150.0]}).set_index('Item')
+        # 2. READ ITEMS DATA
+        try:
+            item_data = conn.read(worksheet="Items")
+            item_data = item_data.set_index('Item')
+        except Exception:
+            # Fallback
+            items = ['Filter (Low)', 'Filter (Medium)', 'Filter (High)', 'Retail (Low)', 'Retail (Medium)', 'Retail (High)', 'Espresso + Milk', 'Matcha', 'Tea', 'Merch']
+            item_data = pd.DataFrame({'Item': items, 'Total Volume (kg)': [0.0]*10, 'Total Revenue ($)': [0.0]*10, 'Total COGS ($)': [0.0]*10}).set_index('Item')
 
         # Visuals Section
         st.header("📊 2025 Performance Visualizations")
         
-        # Calculate for plots
         df_monthly = monthly_data.copy()
         df_monthly['Net Profit ($)'] = df_monthly['Net Sales ($)'] - df_monthly['Total Costs ($)']
         df_monthly['Month'] = df_monthly.index
@@ -360,27 +355,28 @@ if st.session_state["authentication_status"]:
         df_items.loc[df_items['Total Revenue ($)'] > 0, 'Profit Margin (%)'] = (df_items['Gross Profit ($)'] / df_items['Total Revenue ($)']) * 100
         df_items['Profit Margin (%)'] = df_items['Profit Margin (%)'].fillna(0)
 
-        # Chart 1: P&L (Full Width)
+        # Chart 1: P&L
         df_pnl_plot = df_monthly[['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)']].reset_index().melt(id_vars='Month', value_vars=['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)'], var_name='Metric', value_name='Value')
         fig_pnl = px.bar(df_pnl_plot, x='Month', y='Value', color='Metric', barmode='group', title="Net Sales, Costs, & Profit")
         fig_pnl.add_hline(y=0, line_dash="dash", line_color="red")
         st.plotly_chart(fig_pnl, use_container_width=True)
             
-        # Chart 2: Items (Full Width)
+        # Chart 2: Items
         st.markdown("---")
         df_profit_rank = df_items[df_items['Gross Profit ($)'] > 0].sort_values('Gross Profit ($)', ascending=False).reset_index()
         fig_items = px.bar(df_profit_rank, x='Item', y='Gross Profit ($)', color='Profit Margin (%)', title="Item Profit Ranking")
         st.plotly_chart(fig_items, use_container_width=True)
 
         st.header("✍️ Update Historical Data")
+        st.markdown("To update this data, please edit your connected **Google Sheet**.")
+        
         st.subheader("1. Monthly Net Sales and Total Costs")
-        st.data_editor(monthly_data, num_rows="fixed", key="monthly_editor")
+        st.dataframe(monthly_data, use_container_width=True)
         
         st.subheader("2. Sales Per Item")
-        st.data_editor(item_data, num_rows="fixed", key="item_editor")
+        st.dataframe(item_data, use_container_width=True)
 
-# Handle Failed Authentication
-elif st.session_state["authentication_status"] is False:
+elif authentication_status is False:
     st.error('Username/password is incorrect')
-elif st.session_state["authentication_status"] is None:
+elif authentication_status is None:
     st.warning('Please enter your username and password')
