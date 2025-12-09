@@ -1,4 +1,46 @@
 import streamlit as st
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
+
+# --- Configuration for Credentials ---
+# For a simple app, credentials are often stored in a YAML file or dictionary.
+# This example uses a dictionary for simplicity, but a YAML file is standard.
+
+names = ['Praveen R.', 'Guest User']
+usernames = ['pr', 'guest']
+passwords = ['abc1234', 'test']  # Hash these for production!
+
+# Generate hashed passwords (MANDATORY for stauth)
+hashed_passwords = stauth.Hasher(passwords).generate()
+
+
+# --- Initialize the Authenticator ---
+authenticator = stauth.Authenticate(
+    names,
+    usernames,
+    hashed_passwords,
+    'coffee_app_cookie', # cookie name
+    'abcdef',            # cookie key (random string)
+    cookie_expiry_days=30
+)
+
+# --- Render the Login Widget ---
+name, authentication_status, username = authenticator.login('Login', 'main')
+
+
+# --- Application Logic Based on Status ---
+
+if authentication_status:
+    # --- SUCCESS: User is logged in ---
+    
+    # Show the logout button
+    authenticator.logout('Logout', 'main')
+    
+    st.title(f"Welcome, {name}!")
+
+
+import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
@@ -661,3 +703,12 @@ with tab2:
     if total_fixed_edited > 0:
         labor_percent_input = (labor_cost_input / total_fixed_edited) * 100
         st.info(f"**Fixed Cost Structure:** Labor accounts for **{labor_percent_input:.1f}%** of your total annual fixed costs (${total_fixed_edited:,.2f}).")
+
+
+elif authentication_status == False:
+    # --- FAILURE: Incorrect credentials ---
+    st.error('Username/password is incorrect')
+
+elif authentication_status == None:
+    # --- PENDING: Waiting for user input ---
+    st.warning('Please enter your username and password')
