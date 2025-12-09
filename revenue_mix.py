@@ -6,8 +6,9 @@ import altair as alt
 import yaml
 from yaml.loader import SafeLoader
 
-# --- AUTH LIBRARIES (STABLE 0.3.3) ---
+# --- AUTH LIBRARIES (MODERN SYNTAX) ---
 import streamlit_authenticator as stauth
+from streamlit_authenticator.utilities.hasher import Hasher
 
 # --- GOOGLE SHEETS CONNECTION ---
 from streamlit_gsheets import GSheetsConnection
@@ -20,14 +21,12 @@ from streamlit_gsheets import GSheetsConnection
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # 2. LOAD CONFIG DEFAULTS (Tab: "Config")
-# We try to load defaults, otherwise we use safe fallbacks
 config = {}
 try:
     df_config = conn.read(worksheet="Config")
     # Convert 2-column table (Key, Value) into a dictionary
     config = dict(zip(df_config['Key'], df_config['Value']))
 except Exception:
-    # If config fails, we don't stop; we just use defaults later
     pass
 
 # 3. DEFINE USERS
@@ -35,41 +34,48 @@ names = ['Praveen R.', 'Guest User']
 usernames = ['pr', 'guest']
 
 # 4. LOAD PASSWORDS (HASHED)
-# We expect the 'Config' tab in Google Sheets to have keys:
-# 'pr_password_hash' and 'guest_password_hash' containing the $2b$ strings.
+# Attempt to get hashes from the Config sheet first.
 try:
     if 'pr_password_hash' in config:
         hashed_passwords = [config['pr_password_hash'], config['guest_password_hash']]
     else:
-        # Fallback: Hash them on the fly (Only works if bcrypt installs correctly locally)
-        # This is just a safety net if the sheet is empty
+        # Fallback: Hash them on the fly
         raw_passwords = ['abc1234', 'test']
-        hashed_passwords = stauth.Hasher(raw_passwords).generate()
+        hashed_passwords = Hasher(raw_passwords).generate()
 except Exception as e:
-    st.error(f"Error initializing passwords. Please check Config sheet: {e}")
+    st.error(f"Error initializing passwords: {e}")
     st.stop()
 
-# 5. INITIALIZE AUTHENTICATOR (LEGACY 0.3.3 SYNTAX)
-# This version takes LISTS, not a dictionary
+# 5. CREATE CREDENTIALS DICTIONARY (REQUIRED FOR MODERN VERSIONS)
+# This is the step that fixes your specific error.
+credentials = {
+    "usernames": {
+        usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
+        usernames[1]: {"name": names[1], "password": hashed_passwords[1]}
+    }
+}
+
+# 6. INITIALIZE AUTHENTICATOR
+# We pass the 'credentials' dictionary as the first argument
 authenticator = stauth.Authenticate(
-    names,
-    usernames,
-    hashed_passwords,
+    credentials,
     'coffee_app_cookie', 
     'abcdef',            
     cookie_expiry_days=30
 )
 
-# 6. RENDER LOGIN WIDGET
-name, authentication_status, username = authenticator.login('Login', 'main')
+# 7. RENDER LOGIN WIDGET
+# The modern login method takes 'main' as the argument
+authenticator.login('main')
 
 # ==========================================
 # APP LOGIC
 # ==========================================
 
-if authentication_status:
+# Check session state for authentication status
+if st.session_state["authentication_status"]:
     authenticator.logout('Logout', 'main')
-    st.title(f"Welcome, {name}!")
+    st.title(f"Welcome, {st.session_state['name']}!")
 
     tab1, tab2 = st.tabs(["📊 Scenario Planning", "📅 2025 Lookback"])
 
@@ -93,8 +99,6 @@ if authentication_status:
 
             col_a, col_b = st.columns(2)
             with col_a:
-                # Use .get() to pull from config, or use default if missing. 
-                # We wrap in float() or int() because Sheets might return strings.
                 price_low = st.number_input("Low Price ($/kg)", value=float(config.get('price_low', 6.0)), step=0.5)
                 kg_low = st.number_input("Low Amount (KG)", value=int(config.get('kg_low', 300)), step=50)
 
@@ -144,7 +148,7 @@ if authentication_status:
                 drop_cost_kg = st.number_input("Drop Ship/Pack per KG ($)", value=float(config.get('drop_cost_kg', 15.0)))
 
             with st.expander("Events / Catering", expanded=False):
-                event_vol_kg = st.slider("Event Volume (Roasted KG)", 0, 500, 0) # Defaults to 0 often, so we can leave as 0 or config
+                event_vol_kg = st.slider("Event Volume (Roasted KG)", 0, 500, 0)
                 event_rev_kg = st.number_input("Event Rev per KG ($)", value=60.0)
                 event_cost_kg = st.number_input("Event Labor per KG ($)", value=10.0)
 
@@ -376,7 +380,7 @@ if authentication_status:
         st.subheader("2. Sales Per Item")
         st.dataframe(item_data, use_container_width=True)
 
-elif authentication_status is False:
+elif st.session_state["authentication_status"] is False:
     st.error('Username/password is incorrect')
-elif authentication_status is None:
+elif st.session_state["authentication_status"] is None:
     st.warning('Please enter your username and password')
