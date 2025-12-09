@@ -1,51 +1,59 @@
 import streamlit as st
-import yaml
-from yaml.loader import SafeLoader
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import altair as alt
+import yaml
+from yaml.loader import SafeLoader
 
-# --- IMPORT AUTHENTICATOR (STABLE V0.3.3 STYLE) ---
+# --- AUTH LIBRARIES ---
 import streamlit_authenticator as stauth
+from streamlit_authenticator.utilities.hasher import Hasher
 
-# --- Configuration for Credentials ---
+# ==========================================
+# 0. AUTHENTICATION SETUP (MODERN SYNTAX)
+# ==========================================
+
+# 1. Define Users
 names = ['Praveen R.', 'Guest User']
 usernames = ['pr', 'guest']
 passwords = ['abc1234', 'test']
 
-# --- HASHING (STABLE V0.3.3 STYLE) ---
-# We use stauth.Hasher() directly. 
-hashed_passwords = stauth.Hasher(passwords).generate()
+# 2. Hash Passwords
+hashed_passwords = Hasher(passwords).generate()
 
-# --- Initialize the Authenticator ---
+# 3. Create the 'credentials' dictionary (REQUIRED for new versions)
+credentials = {
+    "usernames": {
+        usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
+        usernames[1]: {"name": names[1], "password": hashed_passwords[1]}
+    }
+}
+
+# 4. Initialize Authenticator using the dictionary
 authenticator = stauth.Authenticate(
-    names,
-    usernames,
-    hashed_passwords,
-    'coffee_app_cookie',
-    'abcdef',
+    credentials,
+    'coffee_app_cookie',  # Cookie Name
+    'abcdef',             # Key (Signature)
     cookie_expiry_days=30
 )
 
-# --- Render the Login Widget ---
-name, authentication_status, username = authenticator.login('Login', 'main')
+# 5. Render Login Widget
+authenticator.login('main')
 
-# --- Application Logic ---
-if authentication_status:
+# Get the status directly from session state
+if st.session_state["authentication_status"]:
+    
+    # --- SUCCESS: APP LOGIC STARTS HERE ---
     authenticator.logout('Logout', 'main')
-    st.title(f"Welcome, {name}!")
+    st.title(f"Welcome, {st.session_state['name']}!")
 
-    # --- YOUR APP CONTENT STARTS HERE ---
     tab1, tab2 = st.tabs(["📊 Scenario Planning", "📅 2025 Lookback"])
 
     with tab1:
         # ==========================================
         # 1. CONFIGURATION & PAGE SETUP
         # ==========================================
-        # st.set_page_config is not compatible inside an 'if' block usually, 
-        # so we skip it or put it at the very top of the script (outside the if).
-        
         st.markdown("""
         <style>
             .big-font { font-size: 24px !important; font-weight: bold; }
@@ -63,7 +71,6 @@ if authentication_status:
             st.header("1. Supply Side (Green Buying)")
             st.caption("Enter the exact Amount (KG) you plan to buy:")
 
-            # Green Coffee Portfolio
             col_a, col_b = st.columns(2)
             with col_a:
                 price_low = st.number_input("Low Price ($/kg)", value=6.0, step=0.5)
@@ -100,7 +107,6 @@ if authentication_status:
             st.header("3. Demand Side (Channels)")
             st.caption("Projected Sales for January")
 
-            # Channels
             with st.expander("Shop Service (Cups)", expanded=False):
                 shop_vol_kg = st.slider("Shop Volume (Roasted KG)", 0, 500, 150)
                 shop_rev_kg = st.number_input("Shop Rev per KG ($)", value=85.0)
@@ -341,7 +347,8 @@ if authentication_status:
         st.subheader("2. Sales Per Item")
         st.data_editor(item_data, num_rows="fixed", key="item_editor")
 
-elif authentication_status == False:
+# Handle Failed Authentication
+elif st.session_state["authentication_status"] is False:
     st.error('Username/password is incorrect')
-elif authentication_status == None:
+elif st.session_state["authentication_status"] is None:
     st.warning('Please enter your username and password')
