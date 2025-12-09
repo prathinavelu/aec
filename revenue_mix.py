@@ -11,18 +11,28 @@ import streamlit_authenticator as stauth
 from streamlit_authenticator.utilities.hasher import Hasher
 
 # ==========================================
-# 0. AUTHENTICATION SETUP (MODERN SYNTAX)
+# 0. AUTHENTICATION SETUP (SECURE)
 # ==========================================
 
 # 1. Define Users
 names = ['Praveen R.', 'Guest User']
 usernames = ['pr', 'guest']
-passwords = st.secrets["passwords"]
 
-# 2. Hash Passwords
+# 2. LOAD PASSWORDS FROM SECRETS (Hidden from GitHub)
+# We access the [auth] section of secrets.toml
+try:
+    passwords = [st.secrets["auth"]["pr_password"], st.secrets["auth"]["guest_password"]]
+except FileNotFoundError:
+    st.error("Secrets file not found. Please configure secrets on Streamlit Cloud.")
+    st.stop()
+except KeyError:
+    st.error("Secrets are missing specific keys. Check your [auth] section.")
+    st.stop()
+
+# 3. Hash Passwords
 hashed_passwords = Hasher(passwords).generate()
 
-# 3. Create the 'credentials' dictionary (REQUIRED for new versions)
+# 4. Create the 'credentials' dictionary
 credentials = {
     "usernames": {
         usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
@@ -30,7 +40,7 @@ credentials = {
     }
 }
 
-# 4. Initialize Authenticator
+# 5. Initialize Authenticator
 authenticator = stauth.Authenticate(
     credentials,
     'coffee_app_cookie',  # Cookie Name
@@ -38,7 +48,7 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=30
 )
 
-# 5. Render Login Widget
+# 6. Render Login Widget
 authenticator.login('main')
 
 # Get the status directly from session state
@@ -51,7 +61,7 @@ if st.session_state["authentication_status"]:
     tab1, tab2 = st.tabs(["📊 Scenario Planning", "📅 2025 Lookback"])
 
     # ----------------------------------------------------
-    # TAB 1: SCENARIO PLANNING (Existing Code)
+    # TAB 1: SCENARIO PLANNING
     # ----------------------------------------------------
     with tab1:
         # ==========================================
@@ -310,17 +320,23 @@ if st.session_state["authentication_status"]:
         st.plotly_chart(fig, use_container_width=True)
 
     # ----------------------------------------------------
-    # TAB 2: 2025 LOOKBACK (Fixed Width & Default Data)
+    # TAB 2: 2025 LOOKBACK (Fixed Width & Secure Data)
     # ----------------------------------------------------
     with tab2:
         st.header("📅 2025 Lookback: Historical Data Analysis")
         
-        # --- FIXED DEFAULT DATA (FROM USER REQUEST) ---
+        # --- LOAD SECURE DATA FROM SECRETS (Hidden from GitHub) ---
         months = pd.date_range(start='2025-01-01', periods=12, freq='MS').strftime('%Y-%m')
         
-        # Note: I converted your negative Costs to POSITIVE values so the P&L math (Sales - Cost) works correctly.
-        historical_costs = [44565.13, 29131.01, 49302.03, 52682.69, 38346.46, 50234.74, 55677.81, 46872.49, 49333.80, 48132.63, 55296.14, 0.0]
-        historical_sales = [0.00, 0.00, 0.00, 854.37, 18553.46, 33196.25, 34194.37, 37366.05, 37279.44, 47364.42, 52434.93, 0.0]
+        # Accessing the financial lists we saved in secrets.toml
+        # If keys are missing, we default to zeros to prevent crashes
+        try:
+            historical_costs = st.secrets["historical"]["costs"]
+            historical_sales = st.secrets["historical"]["sales"]
+        except (KeyError, FileNotFoundError):
+            st.warning("Historical data not found in Secrets. Using zeros.")
+            historical_costs = [0.0] * 12
+            historical_sales = [0.0] * 12
 
         monthly_data = pd.DataFrame({
             'Month': months, 
@@ -344,15 +360,13 @@ if st.session_state["authentication_status"]:
         df_items.loc[df_items['Total Revenue ($)'] > 0, 'Profit Margin (%)'] = (df_items['Gross Profit ($)'] / df_items['Total Revenue ($)']) * 100
         df_items['Profit Margin (%)'] = df_items['Profit Margin (%)'].fillna(0)
 
-        # --- CHART FIX: REMOVED COLUMNS (Full Width) ---
-        
-        # Chart 1: P&L
+        # Chart 1: P&L (Full Width)
         df_pnl_plot = df_monthly[['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)']].reset_index().melt(id_vars='Month', value_vars=['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)'], var_name='Metric', value_name='Value')
         fig_pnl = px.bar(df_pnl_plot, x='Month', y='Value', color='Metric', barmode='group', title="Net Sales, Costs, & Profit")
         fig_pnl.add_hline(y=0, line_dash="dash", line_color="red")
         st.plotly_chart(fig_pnl, use_container_width=True)
             
-        # Chart 2: Items
+        # Chart 2: Items (Full Width)
         st.markdown("---")
         df_profit_rank = df_items[df_items['Gross Profit ($)'] > 0].sort_values('Gross Profit ($)', ascending=False).reset_index()
         fig_items = px.bar(df_profit_rank, x='Item', y='Gross Profit ($)', color='Profit Margin (%)', title="Item Profit Ranking")
