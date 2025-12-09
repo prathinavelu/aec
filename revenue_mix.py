@@ -1,7 +1,10 @@
 import streamlit as st
-import streamlit_authenticator as stauth
-import yaml
+import yaml 
 from yaml.loader import SafeLoader
+
+# --- CHANGE IS HERE ---
+from streamlit_authenticator import Authenticate
+from streamlit_authenticator.utilities.hasher import Hasher
 
 # --- Configuration for Credentials ---
 # For a simple app, credentials are often stored in a YAML file or dictionary.
@@ -9,22 +12,22 @@ from yaml.loader import SafeLoader
 
 names = ['Praveen R.', 'Guest User']
 usernames = ['pr', 'guest']
-passwords = ['abc1234', 'test']  # Hash these for production!
+passwords = ['abc1234', 'test'] 
 
-# Generate hashed passwords (MANDATORY for stauth)
-hashed_passwords = stauth.Hasher(passwords).generate()
-
+# --- CHANGE IS HERE ---
+# Use Hasher directly, since it's imported above
+hashed_passwords = Hasher(passwords).generate() 
+# ----------------------
 
 # --- Initialize the Authenticator ---
-authenticator = stauth.Authenticate(
+authenticator = Authenticate( # Use Authenticate directly
     names,
     usernames,
     hashed_passwords,
-    'coffee_app_cookie', # cookie name
-    'abcdef',            # cookie key (random string)
+    'coffee_app_cookie', 
+    'abcdef',            
     cookie_expiry_days=30
 )
-
 # --- Render the Login Widget ---
 name, authentication_status, username = authenticator.login('Login', 'main')
 
