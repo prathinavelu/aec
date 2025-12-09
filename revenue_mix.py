@@ -30,7 +30,7 @@ credentials = {
     }
 }
 
-# 4. Initialize Authenticator using the dictionary
+# 4. Initialize Authenticator
 authenticator = stauth.Authenticate(
     credentials,
     'coffee_app_cookie',  # Cookie Name
@@ -50,6 +50,9 @@ if st.session_state["authentication_status"]:
 
     tab1, tab2 = st.tabs(["📊 Scenario Planning", "📅 2025 Lookback"])
 
+    # ----------------------------------------------------
+    # TAB 1: SCENARIO PLANNING (Existing Code)
+    # ----------------------------------------------------
     with tab1:
         # ==========================================
         # 1. CONFIGURATION & PAGE SETUP
@@ -306,11 +309,24 @@ if st.session_state["authentication_status"]:
         
         st.plotly_chart(fig, use_container_width=True)
 
+    # ----------------------------------------------------
+    # TAB 2: 2025 LOOKBACK (Fixed Width & Default Data)
+    # ----------------------------------------------------
     with tab2:
         st.header("📅 2025 Lookback: Historical Data Analysis")
-        # Initialize default data
+        
+        # --- FIXED DEFAULT DATA (FROM USER REQUEST) ---
         months = pd.date_range(start='2025-01-01', periods=12, freq='MS').strftime('%Y-%m')
-        monthly_data = pd.DataFrame({'Month': months, 'Net Sales ($)': [10000.0]*12, 'Total Costs ($)': [8000.0]*12}).set_index('Month')
+        
+        # Note: I converted your negative Costs to POSITIVE values so the P&L math (Sales - Cost) works correctly.
+        historical_costs = [44565.13, 29131.01, 49302.03, 52682.69, 38346.46, 50234.74, 55677.81, 46872.49, 49333.80, 48132.63, 55296.14, 0.0]
+        historical_sales = [0.00, 0.00, 0.00, 854.37, 18553.46, 33196.25, 34194.37, 37366.05, 37279.44, 47364.42, 52434.93, 0.0]
+
+        monthly_data = pd.DataFrame({
+            'Month': months, 
+            'Net Sales ($)': historical_sales, 
+            'Total Costs ($)': historical_costs
+        }).set_index('Month')
         
         items = ['Filter (Low)', 'Filter (Medium)', 'Filter (High)', 'Retail (Low)', 'Retail (Medium)', 'Retail (High)', 'Espresso + Milk', 'Matcha', 'Tea', 'Merch']
         item_data = pd.DataFrame({'Item': items, 'Total Volume (kg)': [10.0, 50.0, 100.0, 50.0, 200.0, 300.0, 100.0, 5.0, 2.0, 10.0], 'Total Revenue ($)': [200.0, 800.0, 1500.0, 1000.0, 4000.0, 6000.0, 3000.0, 150.0, 50.0, 500.0], 'Total COGS ($)': [50.0, 200.0, 300.0, 250.0, 1000.0, 1500.0, 750.0, 30.0, 10.0, 150.0]}).set_index('Item')
@@ -328,17 +344,19 @@ if st.session_state["authentication_status"]:
         df_items.loc[df_items['Total Revenue ($)'] > 0, 'Profit Margin (%)'] = (df_items['Gross Profit ($)'] / df_items['Total Revenue ($)']) * 100
         df_items['Profit Margin (%)'] = df_items['Profit Margin (%)'].fillna(0)
 
-        col_chart1, col_chart2 = st.columns(2)
-        with col_chart1:
-            df_pnl_plot = df_monthly[['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)']].reset_index().melt(id_vars='Month', value_vars=['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)'], var_name='Metric', value_name='Value')
-            fig_pnl = px.bar(df_pnl_plot, x='Month', y='Value', color='Metric', barmode='group', title="Net Sales, Costs, & Profit")
-            fig_pnl.add_hline(y=0, line_dash="dash", line_color="red")
-            st.plotly_chart(fig_pnl, use_container_width=True)
+        # --- CHART FIX: REMOVED COLUMNS (Full Width) ---
+        
+        # Chart 1: P&L
+        df_pnl_plot = df_monthly[['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)']].reset_index().melt(id_vars='Month', value_vars=['Net Sales ($)', 'Total Costs ($)', 'Net Profit ($)'], var_name='Metric', value_name='Value')
+        fig_pnl = px.bar(df_pnl_plot, x='Month', y='Value', color='Metric', barmode='group', title="Net Sales, Costs, & Profit")
+        fig_pnl.add_hline(y=0, line_dash="dash", line_color="red")
+        st.plotly_chart(fig_pnl, use_container_width=True)
             
-        with col_chart2:
-            df_profit_rank = df_items[df_items['Gross Profit ($)'] > 0].sort_values('Gross Profit ($)', ascending=False).reset_index()
-            fig_items = px.bar(df_profit_rank, x='Item', y='Gross Profit ($)', color='Profit Margin (%)', title="Item Profit Ranking")
-            st.plotly_chart(fig_items, use_container_width=True)
+        # Chart 2: Items
+        st.markdown("---")
+        df_profit_rank = df_items[df_items['Gross Profit ($)'] > 0].sort_values('Gross Profit ($)', ascending=False).reset_index()
+        fig_items = px.bar(df_profit_rank, x='Item', y='Gross Profit ($)', color='Profit Margin (%)', title="Item Profit Ranking")
+        st.plotly_chart(fig_items, use_container_width=True)
 
         st.header("✍️ Update Historical Data")
         st.subheader("1. Monthly Net Sales and Total Costs")
