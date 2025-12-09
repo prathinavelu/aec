@@ -1,0 +1,3 @@
+[general]
+# Pinning to a stable version (3.9) to resolve build conflicts with bcrypt
+python = "3.9"
