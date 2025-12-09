@@ -2,6 +2,6 @@ streamlit
 pandas
 numpy
 plotly
-streamlit-authenticator
+streamlit-authenticator==0.3.3
 pyyaml  # Needed for streamlit-authenticator to handle config files
 bcrypt
