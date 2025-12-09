@@ -5,7 +5,7 @@ import plotly.express as px
 import altair as alt
 import yaml
 from yaml.loader import SafeLoader
-import bcrypt  # <--- DIRECT IMPORT to avoid Hasher version conflicts
+import bcrypt
 
 # --- AUTH LIBRARIES ---
 import streamlit_authenticator as stauth
@@ -23,8 +23,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # 2. LOAD CONFIG DEFAULTS (Tab: "Config")
 config = {}
 try:
-    df_config = conn.read(worksheet="Config")
-    # Convert 2-column table (Key, Value) into a dictionary
+    # ttl=0 forces a fresh pull every time the app reloads
+    df_config = conn.read(worksheet="Config", ttl=0)
+    # Normalize keys to avoid whitespace issues
+    df_config['Key'] = df_config['Key'].astype(str).str.strip()
     config = dict(zip(df_config['Key'], df_config['Value']))
 except Exception:
     pass
@@ -34,13 +36,11 @@ names = ['Praveen R.', 'Guest User']
 usernames = ['pr', 'guest']
 
 # 4. LOAD PASSWORDS (HASHED)
-# Attempt to get hashes from the Config sheet first.
 try:
     if 'pr_password_hash' in config:
         hashed_passwords = [config['pr_password_hash'], config['guest_password_hash']]
     else:
-        # Fallback: Hash them on the fly using BCRYPT DIRECTLY
-        # This bypasses the Hasher class error completely
+        # Fallback: Hash them on the fly
         raw_passwords = ['abc1234', 'test']
         hashed_passwords = [
             bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode() 
@@ -50,7 +50,7 @@ except Exception as e:
     st.error(f"Error initializing passwords: {e}")
     st.stop()
 
-# 5. CREATE CREDENTIALS DICTIONARY (REQUIRED FOR MODERN VERSIONS)
+# 5. CREATE CREDENTIALS DICTIONARY
 credentials = {
     "usernames": {
         usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
@@ -59,7 +59,6 @@ credentials = {
 }
 
 # 6. INITIALIZE AUTHENTICATOR
-# We pass the 'credentials' dictionary as the first argument
 try:
     authenticator = stauth.Authenticate(
         credentials,
@@ -68,8 +67,7 @@ try:
         cookie_expiry_days=30
     )
 except TypeError:
-    # Failsafe: If the server miraculously downgraded to v0.3.3, this catches it
-    # and uses the old list format.
+    # Failsafe for older library versions
     authenticator = stauth.Authenticate(
         names,
         usernames,
@@ -80,7 +78,6 @@ except TypeError:
     )
 
 # 7. RENDER LOGIN WIDGET
-# The modern login method takes 'main' as the argument
 authenticator.login('main')
 
 # ==========================================
@@ -337,26 +334,47 @@ if st.session_state["authentication_status"]:
         st.plotly_chart(fig, use_container_width=True)
 
     # ----------------------------------------------------
-    # TAB 2: 2025 LOOKBACK (GOOGLE SHEETS INTEGRATED)
+    # TAB 2: 2025 LOOKBACK (GOOGLE SHEETS INTEGRATED - ROBUST)
     # ----------------------------------------------------
     with tab2:
         st.header("📅 2025 Lookback: Historical Data Analysis")
         
         # 1. READ MONTHLY DATA
         try:
-            monthly_data = conn.read(worksheet="Monthly")
+            # ttl=0 forces fresh data
+            monthly_data = conn.read(worksheet="Monthly", ttl=0)
+            # Remove whitespace from column headers to prevent "Net Sales ($) " mismatches
+            monthly_data.columns = monthly_data.columns.str.strip()
+            
+            # Verify columns exist
+            required_monthly_cols = ['Month', 'Net Sales ($)', 'Total Costs ($)']
+            if not all(col in monthly_data.columns for col in required_monthly_cols):
+                st.error(f"⚠️ 'Monthly' sheet missing columns. Found: {list(monthly_data.columns)}. Expected: {required_monthly_cols}")
+                st.stop()
+                
             monthly_data['Month'] = monthly_data['Month'].astype(str) 
             monthly_data = monthly_data.set_index('Month')
-        except Exception:
+            
+        except Exception as e:
+            st.warning(f"⚠️ Could not load 'Monthly' sheet. Error: {e}")
             # Fallback
             months = pd.date_range(start='2025-01-01', periods=12, freq='MS').strftime('%Y-%m')
             monthly_data = pd.DataFrame({'Month': months, 'Net Sales ($)': [0.0]*12, 'Total Costs ($)': [0.0]*12}).set_index('Month')
         
         # 2. READ ITEMS DATA
         try:
-            item_data = conn.read(worksheet="Items")
+            item_data = conn.read(worksheet="Items", ttl=0)
+            item_data.columns = item_data.columns.str.strip()
+            
+            required_item_cols = ['Item', 'Total Volume (kg)', 'Total Revenue ($)', 'Total COGS ($)']
+            if not all(col in item_data.columns for col in required_item_cols):
+                st.error(f"⚠️ 'Items' sheet missing columns. Found: {list(item_data.columns)}. Expected: {required_item_cols}")
+                st.stop()
+                
             item_data = item_data.set_index('Item')
-        except Exception:
+            
+        except Exception as e:
+            st.warning(f"⚠️ Could not load 'Items' sheet. Error: {e}")
             # Fallback
             items = ['Filter (Low)', 'Filter (Medium)', 'Filter (High)', 'Retail (Low)', 'Retail (Medium)', 'Retail (High)', 'Espresso + Milk', 'Matcha', 'Tea', 'Merch']
             item_data = pd.DataFrame({'Item': items, 'Total Volume (kg)': [0.0]*10, 'Total Revenue ($)': [0.0]*10, 'Total COGS ($)': [0.0]*10}).set_index('Item')
@@ -364,12 +382,27 @@ if st.session_state["authentication_status"]:
         # Visuals Section
         st.header("📊 2025 Performance Visualizations")
         
+        # Ensure numeric types
+        for col in ['Net Sales ($)', 'Total Costs ($)']:
+            # Replace $ and , to safely convert strings like "$1,000.00" to floats
+            if monthly_data[col].dtype == object:
+                monthly_data[col] = monthly_data[col].astype(str).str.replace('$', '').str.replace(',', '')
+            monthly_data[col] = pd.to_numeric(monthly_data[col], errors='coerce').fillna(0)
+
         df_monthly = monthly_data.copy()
         df_monthly['Net Profit ($)'] = df_monthly['Net Sales ($)'] - df_monthly['Total Costs ($)']
         df_monthly['Month'] = df_monthly.index
         
+        # Ensure numeric types for Items
+        for col in ['Total Revenue ($)', 'Total COGS ($)']:
+            if item_data[col].dtype == object:
+                item_data[col] = item_data[col].astype(str).str.replace('$', '').str.replace(',', '')
+            item_data[col] = pd.to_numeric(item_data[col], errors='coerce').fillna(0)
+        
         df_items = item_data.copy()
         df_items['Gross Profit ($)'] = df_items['Total Revenue ($)'] - df_items['Total COGS ($)']
+        
+        # Avoid division by zero
         df_items.loc[df_items['Total Revenue ($)'] > 0, 'Profit Margin (%)'] = (df_items['Gross Profit ($)'] / df_items['Total Revenue ($)']) * 100
         df_items['Profit Margin (%)'] = df_items['Profit Margin (%)'].fillna(0)
 
@@ -381,6 +414,7 @@ if st.session_state["authentication_status"]:
             
         # Chart 2: Items
         st.markdown("---")
+        # Only plot items with positive profit to keep chart clean
         df_profit_rank = df_items[df_items['Gross Profit ($)'] > 0].sort_values('Gross Profit ($)', ascending=False).reset_index()
         fig_items = px.bar(df_profit_rank, x='Item', y='Gross Profit ($)', color='Profit Margin (%)', title="Item Profit Ranking")
         st.plotly_chart(fig_items, use_container_width=True)
