@@ -17,7 +17,7 @@ from streamlit_authenticator.utilities.hasher import Hasher
 # 1. Define Users
 names = ['Praveen R.', 'Guest User']
 usernames = ['pr', 'guest']
-passwords = ['abc1234', 'test']
+passwords = st.secrets["passwords"]
 
 # 2. Hash Passwords
 hashed_passwords = Hasher(passwords).generate()
