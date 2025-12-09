@@ -4,3 +4,4 @@ numpy
 plotly
 streamlit-authenticator
 pyyaml  # Needed for streamlit-authenticator to handle config files
+bcrypt
