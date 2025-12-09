@@ -19,12 +19,12 @@ from streamlit_gsheets import GSheetsConnection
 
 # 1. CONNECT TO GOOGLE SHEET
 conn = st.connection("gsheets", type=GSheetsConnection)
-
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1iC3FUTu_OkWTGT-I8IkMphez6UcwjwphIJPOI6rWBzg"
 # 2. LOAD CONFIG DEFAULTS (Tab: "Config")
 config = {}
 try:
     # ttl=0 forces a fresh pull every time the app reloads
-    df_config = conn.read(worksheet="Config", ttl=0)
+    df_config = conn.read(worksheet="Config", ttl=0, spreadsheet=SHEET_URL)
     # Normalize keys to avoid whitespace issues
     df_config['Key'] = df_config['Key'].astype(str).str.strip()
     config = dict(zip(df_config['Key'], df_config['Value']))
@@ -342,7 +342,7 @@ if st.session_state["authentication_status"]:
         # 1. READ MONTHLY DATA
         try:
             # ttl=0 forces fresh data
-            monthly_data = conn.read(worksheet="Monthly", ttl=0)
+            monthly_data = conn.read(worksheet="Monthly", ttl=0, spreadsheet=SHEET_URL)
             # Remove whitespace from column headers to prevent "Net Sales ($) " mismatches
             monthly_data.columns = monthly_data.columns.str.strip()
             
@@ -363,7 +363,7 @@ if st.session_state["authentication_status"]:
         
         # 2. READ ITEMS DATA
         try:
-            item_data = conn.read(worksheet="Items", ttl=0)
+            item_data = conn.read(worksheet="Items", ttl=0, spreadsheet=SHEET_URL)
             item_data.columns = item_data.columns.str.strip()
             
             required_item_cols = ['Item', 'Total Volume (kg)', 'Total Revenue ($)', 'Total COGS ($)']
