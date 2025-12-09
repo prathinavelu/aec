@@ -5,10 +5,10 @@ import plotly.express as px
 import altair as alt
 import yaml
 from yaml.loader import SafeLoader
+import bcrypt  # <--- DIRECT IMPORT to avoid Hasher version conflicts
 
-# --- AUTH LIBRARIES (MODERN SYNTAX) ---
+# --- AUTH LIBRARIES ---
 import streamlit_authenticator as stauth
-from streamlit_authenticator.utilities.hasher import Hasher
 
 # --- GOOGLE SHEETS CONNECTION ---
 from streamlit_gsheets import GSheetsConnection
@@ -39,15 +39,18 @@ try:
     if 'pr_password_hash' in config:
         hashed_passwords = [config['pr_password_hash'], config['guest_password_hash']]
     else:
-        # Fallback: Hash them on the fly
+        # Fallback: Hash them on the fly using BCRYPT DIRECTLY
+        # This bypasses the Hasher class error completely
         raw_passwords = ['abc1234', 'test']
-        hashed_passwords = Hasher(raw_passwords).generate()
+        hashed_passwords = [
+            bcrypt.hashpw(p.encode(), bcrypt.gensalt()).decode() 
+            for p in raw_passwords
+        ]
 except Exception as e:
     st.error(f"Error initializing passwords: {e}")
     st.stop()
 
 # 5. CREATE CREDENTIALS DICTIONARY (REQUIRED FOR MODERN VERSIONS)
-# This is the step that fixes your specific error.
 credentials = {
     "usernames": {
         usernames[0]: {"name": names[0], "password": hashed_passwords[0]},
@@ -57,12 +60,24 @@ credentials = {
 
 # 6. INITIALIZE AUTHENTICATOR
 # We pass the 'credentials' dictionary as the first argument
-authenticator = stauth.Authenticate(
-    credentials,
-    'coffee_app_cookie', 
-    'abcdef',            
-    cookie_expiry_days=30
-)
+try:
+    authenticator = stauth.Authenticate(
+        credentials,
+        'coffee_app_cookie', 
+        'abcdef',            
+        cookie_expiry_days=30
+    )
+except TypeError:
+    # Failsafe: If the server miraculously downgraded to v0.3.3, this catches it
+    # and uses the old list format.
+    authenticator = stauth.Authenticate(
+        names,
+        usernames,
+        hashed_passwords,
+        'coffee_app_cookie', 
+        'abcdef',            
+        cookie_expiry_days=30
+    )
 
 # 7. RENDER LOGIN WIDGET
 # The modern login method takes 'main' as the argument
@@ -72,7 +87,6 @@ authenticator.login('main')
 # APP LOGIC
 # ==========================================
 
-# Check session state for authentication status
 if st.session_state["authentication_status"]:
     authenticator.logout('Logout', 'main')
     st.title(f"Welcome, {st.session_state['name']}!")
