@@ -13,6 +13,7 @@ import streamlit_authenticator as stauth
 # --- GOOGLE SHEETS CONNECTION ---
 from streamlit_gsheets import GSheetsConnection
 
+st.set_page_config(layout="wide", page_title="Coffee Business Engine")
 # ==========================================
 # 0. CONFIGURATION & AUTH SETUP
 # ==========================================
@@ -87,6 +88,15 @@ authenticator.login('main')
 if st.session_state["authentication_status"]:
     authenticator.logout('Logout', 'main')
     st.title(f"Welcome, {st.session_state['name']}!")
+    
+    # --- REFRESH BUTTON MOVED HERE (Outside the tabs) ---
+    st.markdown("---")
+    col_refresh, col_spacer = st.columns([1, 4]) 
+    with col_refresh:
+        if st.button("🔄 Check Google Sheet for Latest Data"):
+            st.rerun() 
+    st.markdown("---")
+    # -----------------------
 
     tab1, tab2 = st.tabs(["📊 Scenario Planning", "📅 2025 Lookback"])
 
@@ -289,7 +299,7 @@ if st.session_state["authentication_status"]:
         profit_type = st.radio("Select Metric to Plot:", ("Gross Profit", "Net Profit"), horizontal=True)
 
         with st.expander("Adjust Scaling Assumptions", expanded=True):
-            base_fixed_costs = st.slider("Base Monthly Fixed Costs ($)", 1000, 15000, int(config.get('base_fixed_costs', 5000)), 500)
+            base_fixed_costs = st.slider("Base Monthly Fixed Costs ($)", 1000, 40000, int(config.get('base_fixed_costs', 5000)), 500)
             col1, col2, col3 = st.columns(3)
             with col1:
                 ws_margin = st.number_input("Wholesale Margin ($/lb)", value=float(config.get('ws_margin', 4.0)))
